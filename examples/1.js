@@ -37,7 +37,7 @@ function myScene(m) {
   }
 }
 
-createScene('first_scene', myScene, {
+createScene(myScene, {
   canvas: {
     width: 'VIEWPORT',
     height: 'VIEWPORT',
@@ -45,4 +45,6 @@ createScene('first_scene', myScene, {
     marginY: 150,
   },
   resetOnResize: true,
+  startAnimating: true,
+  toggle: true,
 })

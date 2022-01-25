@@ -96,46 +96,49 @@
     TWO_PI: Math.PI * 2,
     PI: Math.PI
   };
+  let _sceneCount = 0;
   const EXISTING_SCENES = new Map();
-  function createScene(id, getScene, baseOptions = {}) {
-    if (typeof getScene !== "function")
+  function createScene(sceneFn, sceneOptions = {}, id) {
+    if (typeof sceneFn !== "function")
       throw new Error("Scene is missing");
-    let existing = EXISTING_SCENES.get(id);
+    let sceneId = `simple_scene_${id || ++_sceneCount}`;
+    let existing = EXISTING_SCENES.get(sceneId);
     if (existing) {
       console.warn(`Another scene with id "${id}" already exists. Please provide a different scene ID`);
       return existing;
     }
-    let options = withDefaultSceneOptions(baseOptions);
+    let options = withDefaultSceneOptions(sceneOptions);
     const { canvas, wrapper, toggleAnimateCheckbox } = createCanvas({
-      id,
+      id: sceneId,
       rootNode: options.root,
-      toggle: options.toggle
+      toggle: options.toggle,
+      toggleChecked: options.startAnimating
     });
     const ctx = canvas.getContext("2d");
     let cleanupFunctions = [];
-    let scene = getScene(MATH_CONSTANTS);
+    let scene = sceneFn(MATH_CONSTANTS);
     if (!scene || !scene.setup && !scene.draw) {
       throw new Error("Please provide a scene - (setup, draw)");
     }
     function cleanupScene() {
-      ref.stop();
+      ref.stopAnimating();
       cleanupFunctions.forEach((fn) => fn());
       cleanupFunctions = [];
       toggleAnimateCheckbox?.remove();
       canvas.remove();
       wrapper.remove();
-      ref.start = noop;
-      ref.stop = noop;
+      ref.startAnimating = noop;
+      ref.stopAnimating = noop;
       ref.setup = noop;
       ref.cleanup = noop;
-      EXISTING_SCENES.delete(id);
+      EXISTING_SCENES.delete(sceneId);
     }
-    EXISTING_SCENES.set(id, cleanupScene);
+    EXISTING_SCENES.set(sceneId, cleanupScene);
     let ref = {
       canvas,
       ctx,
-      start: noop,
-      stop: noop,
+      startAnimating: noop,
+      stopAnimating: noop,
       setup: noop,
       cleanup: cleanupScene,
       CVS_WIDTH: 0,
@@ -150,18 +153,18 @@
       if (options?.resetOnResize !== false && ref.setup)
         ref.setup();
     }));
-    if (typeof scene.setup === "function") {
-      scene.setup.call(ref);
-      ref.setup = scene.setup.bind(ref);
-    }
     if (typeof scene.draw === "function") {
       let [startLoop, stopLoop] = onRAF(scene.draw.bind(ref));
-      ref.start = () => {
+      if (options.startAnimating) {
+        startLoop();
+      }
+      ref.startAnimating = () => {
+        stopLoop();
         startLoop();
         if (toggleAnimateCheckbox && !toggleAnimateCheckbox.checked)
           toggleAnimateCheckbox.checked = true;
       };
-      ref.stop = () => {
+      ref.stopAnimating = () => {
         stopLoop();
         if (toggleAnimateCheckbox && toggleAnimateCheckbox.checked)
           toggleAnimateCheckbox.checked = false;
@@ -170,29 +173,49 @@
         cleanupFunctions.push(on(toggleAnimateCheckbox, "change", () => {
           const { checked } = toggleAnimateCheckbox;
           checked ? startLoop() : stopLoop();
-        }));
+        }, { runImmediately: false }));
       }
+    }
+    if (typeof scene.setup === "function") {
+      scene.setup.call(ref);
+      ref.setup = scene.setup.bind(ref);
     }
     return cleanupScene;
   }
   function noop() {
   }
   function withDefaultSceneOptions(options) {
-    if (!options.root)
+    if (!(options.root instanceof HTMLElement))
       options.root = document.body;
     if (options.resetOnResize == null)
       options.resetOnResize = true;
     if (options.toggle == null)
       options.toggle = true;
+    if (options.startAnimating == null)
+      options.startAnimating = true;
     if (options.canvas) {
-      if (!options.canvas.height)
-        options.canvas.height = "VIEWPORT";
-      if (!options.canvas.width)
-        options.canvas.width = "VIEWPORT";
-      if (!options.canvas.marginX)
-        options.canvas.marginX = 0;
-      if (!options.canvas.marginY)
-        options.canvas.marginX = 0;
+      let {
+        height = "VIEWPORT",
+        width = "VIEWPORT",
+        marginX = 0,
+        marginY = 0
+      } = options.canvas;
+      if (typeof height === "string" && height !== "VIEWPORT")
+        height = "VIEWPORT";
+      else if (typeof height === "number" && height < 0)
+        height = 0;
+      if (typeof width === "string" && width !== "VIEWPORT")
+        width = "VIEWPORT";
+      else if (typeof width === "number" && width < 0)
+        width = 0;
+      if (typeof marginX !== "number" || marginX < 0)
+        marginX = 0;
+      if (typeof marginY !== "number" || marginY < 0)
+        marginY = 0;
+      options.canvas.width = width;
+      options.canvas.height = height;
+      options.canvas.marginX = marginX;
+      options.canvas.marginY = marginY;
     }
     if (!options.canvas)
       options.canvas = {
@@ -206,10 +229,11 @@
   function createCanvas({
     id,
     toggle,
+    toggleChecked,
     rootNode
   }) {
     const wrapper = document.createElement("div");
-    wrapper.id = id;
+    wrapper.setAttribute("data-scene-id", id);
     wrapper.style.position = "relative";
     const canvas = document.createElement("canvas");
     canvas.style.display = "block";
@@ -221,10 +245,11 @@
       const attrs = [
         ["type", "checkbox"],
         ["class", "toggle-animate"],
-        ["checked", true]
+        ["checked", toggleChecked]
       ];
+      console.log({ toggleChecked });
       attrs.forEach(([attr, value]) => {
-        if (value === null) {
+        if (value == null || value === false) {
           checkbox.removeAttribute(attr);
         } else {
           checkbox.setAttribute(attr, value.toString());

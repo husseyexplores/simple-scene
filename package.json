@@ -1,6 +1,7 @@
 {
   "name": "simple-scene",
-  "version": "0.0.1-alpha.0",
+  "version": "0.0.1-next.2",
+  "description": "Super simple HTML Canvas starter",
   "files": [
     "dist"
   ],
@@ -28,5 +29,21 @@
     "rimraf": "^3.0.2",
     "typescript": "^4.5.5",
     "vite": "^2.7.2"
-  }
+  },
+  "author": "husseyexplores",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/husseyexplores/simple-scene.git"
+  },
+  "bugs": {
+    "url": "https://github.com/husseyexplores/simple-scene/issues"
+  },
+  "homepage": "https://github.com/husseyexplores/simple-scene#readme",
+  "keywords": [
+    "canvas",
+    "simple-canvas",
+    "canvas-scene",
+    "canvas-boilerplate"
+  ]
 }

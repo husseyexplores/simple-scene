@@ -1,5 +1,5 @@
 import { onRAF, setCanvasHeight, on } from './utils'
-import type { GetScene, SceneOptions, SceneRef, MathConstants } from './types'
+import type { SceneFn, SceneOptions, SceneRef, MathConstants } from './types'
 
 // -------------------------------------------------
 
@@ -7,17 +7,18 @@ const MATH_CONSTANTS: MathConstants = {
   TWO_PI: Math.PI * 2,
   PI: Math.PI,
 }
-
+let _sceneCount = 0
 const EXISTING_SCENES: Map<string, () => void> = new Map()
 
 export function createScene(
-  id: Element['id'],
-  getScene: GetScene,
-  baseOptions: SceneOptions = {},
+  sceneFn: SceneFn,
+  sceneOptions: SceneOptions = {},
+  id?: 'string',
 ) {
-  if (typeof getScene !== 'function') throw new Error('Scene is missing')
+  if (typeof sceneFn !== 'function') throw new Error('Scene is missing')
 
-  let existing = EXISTING_SCENES.get(id)
+  let sceneId = `simple_scene_${id || ++_sceneCount}`
+  let existing = EXISTING_SCENES.get(sceneId)
   if (existing) {
     console.warn(
       `Another scene with id "${id}" already exists. Please provide a different scene ID`,
@@ -25,24 +26,25 @@ export function createScene(
     return existing
   }
 
-  let options = withDefaultSceneOptions(baseOptions)
+  let options = withDefaultSceneOptions(sceneOptions)
   const { canvas, wrapper, toggleAnimateCheckbox } = createCanvas({
-    id: id,
+    id: sceneId,
     rootNode: options.root,
     toggle: options.toggle,
+    toggleChecked: options.startAnimating,
   })
   const ctx = canvas.getContext('2d') as CanvasRenderingContext2D
 
   let cleanupFunctions: Function[] = []
 
-  let scene = getScene(MATH_CONSTANTS)
+  let scene = sceneFn(MATH_CONSTANTS)
 
   if (!scene || (!scene.setup && !scene.draw)) {
     throw new Error('Please provide a scene - (setup, draw)')
   }
 
   function cleanupScene() {
-    ref.stop()
+    ref.stopAnimating()
 
     cleanupFunctions.forEach(fn => fn())
     cleanupFunctions = []
@@ -52,24 +54,24 @@ export function createScene(
     canvas.remove()
     wrapper.remove()
 
-    ref.start = noop
-    ref.stop = noop
+    ref.startAnimating = noop
+    ref.stopAnimating = noop
     ref.setup = noop
     ref.cleanup = noop
 
-    EXISTING_SCENES.delete(id)
+    EXISTING_SCENES.delete(sceneId)
     // ref.canvas = null
     // ref.ctx = null
     // ref = null
   }
 
-  EXISTING_SCENES.set(id, cleanupScene)
+  EXISTING_SCENES.set(sceneId, cleanupScene)
 
   let ref: SceneRef = {
     canvas,
     ctx,
-    start: noop,
-    stop: noop,
+    startAnimating: noop,
+    stopAnimating: noop,
     setup: noop,
     cleanup: cleanupScene,
     CVS_WIDTH: 0,
@@ -92,21 +94,24 @@ export function createScene(
     }),
   )
 
-  if (typeof scene.setup === 'function') {
-    scene.setup.call(ref)
-    ref.setup = scene.setup.bind(ref)
-  }
-
   if (typeof scene.draw === 'function') {
     let [startLoop, stopLoop] = onRAF(scene.draw.bind(ref as SceneRef))
-
-    ref.start = () => {
+    if (options.startAnimating) {
+      // This is run on the next-tick. So `draw` will always run after the `setup`
       startLoop()
+    }
+
+    ref.startAnimating = () => {
+      // Cancel any previous frame
+      stopLoop()
+
+      startLoop()
+
       if (toggleAnimateCheckbox && !toggleAnimateCheckbox.checked)
         toggleAnimateCheckbox.checked = true
     }
 
-    ref.stop = () => {
+    ref.stopAnimating = () => {
       stopLoop()
       if (toggleAnimateCheckbox && toggleAnimateCheckbox.checked)
         toggleAnimateCheckbox.checked = false
@@ -114,12 +119,22 @@ export function createScene(
 
     if (toggleAnimateCheckbox) {
       cleanupFunctions.push(
-        on(toggleAnimateCheckbox, 'change', () => {
-          const { checked } = toggleAnimateCheckbox
-          checked ? startLoop() : stopLoop()
-        }),
+        on(
+          toggleAnimateCheckbox,
+          'change',
+          () => {
+            const { checked } = toggleAnimateCheckbox
+            checked ? startLoop() : stopLoop()
+          },
+          { runImmediately: false },
+        ),
       )
     }
+  }
+
+  if (typeof scene.setup === 'function') {
+    scene.setup.call(ref)
+    ref.setup = scene.setup.bind(ref)
   }
 
   return cleanupScene
@@ -130,15 +145,33 @@ function noop() {}
 function withDefaultSceneOptions(
   options: SceneOptions,
 ): Required<SceneOptions> {
-  if (!options.root) options.root = document.body
+  if (!(options.root instanceof HTMLElement)) options.root = document.body
+
   if (options.resetOnResize == null) options.resetOnResize = true
   if (options.toggle == null) options.toggle = true
+  if (options.startAnimating == null) options.startAnimating = true
 
   if (options.canvas) {
-    if (!options.canvas.height) options.canvas.height = 'VIEWPORT'
-    if (!options.canvas.width) options.canvas.width = 'VIEWPORT'
-    if (!options.canvas.marginX) options.canvas.marginX = 0
-    if (!options.canvas.marginY) options.canvas.marginX = 0
+    let {
+      height = 'VIEWPORT',
+      width = 'VIEWPORT',
+      marginX = 0,
+      marginY = 0,
+    } = options.canvas
+
+    if (typeof height === 'string' && height !== 'VIEWPORT') height = 'VIEWPORT'
+    else if (typeof height === 'number' && height < 0) height = 0
+
+    if (typeof width === 'string' && width !== 'VIEWPORT') width = 'VIEWPORT'
+    else if (typeof width === 'number' && width < 0) width = 0
+
+    if (typeof marginX !== 'number' || marginX < 0) marginX = 0
+    if (typeof marginY !== 'number' || marginY < 0) marginY = 0
+
+    options.canvas.width = width
+    options.canvas.height = height
+    options.canvas.marginX = marginX
+    options.canvas.marginY = marginY
   }
 
   if (!options.canvas)
@@ -155,10 +188,12 @@ function withDefaultSceneOptions(
 function createCanvas({
   id,
   toggle,
+  toggleChecked,
   rootNode,
 }: {
-  id: Element['id']
+  id: string
   toggle: boolean
+  toggleChecked: boolean
   rootNode: HTMLElement
 }): {
   wrapper: HTMLElement
@@ -167,7 +202,7 @@ function createCanvas({
 } {
   // 01. Create wrapper
   const wrapper = document.createElement('div')
-  wrapper.id = id
+  wrapper.setAttribute('data-scene-id', id)
   wrapper.style.position = 'relative'
 
   // 02. Create canvas
@@ -185,11 +220,12 @@ function createCanvas({
     const attrs: [string, string | boolean | null][] = [
       ['type', 'checkbox'],
       ['class', 'toggle-animate'],
-      ['checked', true],
+      ['checked', toggleChecked],
     ]
 
+    console.log({ toggleChecked })
     attrs.forEach(([attr, value]) => {
-      if (value === null) {
+      if (value == null || value === false) {
         checkbox.removeAttribute(attr)
       } else {
         checkbox.setAttribute(attr, value.toString())

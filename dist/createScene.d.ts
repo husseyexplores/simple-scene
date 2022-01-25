@@ -1,2 +1,2 @@
-import type { GetScene, SceneOptions } from './types';
-export declare function createScene(id: Element['id'], getScene: GetScene, baseOptions?: SceneOptions): () => void;
+import type { SceneFn, SceneOptions } from './types';
+export declare function createScene(sceneFn: SceneFn, sceneOptions?: SceneOptions, id?: 'string'): () => void;
